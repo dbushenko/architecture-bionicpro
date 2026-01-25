@@ -1,6 +1,21 @@
-version: '3.8'
-
 services:
+  ldap:
+    image: osixia/openldap:latest
+    environment:
+      LDAP_ORGANISATION: "BionicPRO"
+      LDAP_DOMAIN: "bionicpro.com"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_BASE_DN: "dc=bionicpro,dc=com"
+      LDAP_TLS: "false"
+    volumes:
+      - ./ldap/config.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/init.ldif
+      - ldap-data:/var/lib/ldap
+      - ldap-config:/etc/ldap/slapd.d
+    ports:
+      - "389:389"
+      - "636:636"
+    command: --copy-service
+
   keycloak_db:
     image: postgres:14
     environment:
@@ -42,6 +57,7 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      - ldap
       - keycloak_db
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
@@ -57,7 +73,7 @@ services:
       - "8081:8081"
     environment:
       KEYCLOAK_SERVER_URL: http://keycloak:8080
-      KEYCLOAK_REALM: reports-realm
+      KEYCLOAK_REALM: reports-realm-updated
       KEYCLOAK_CLIENT_ID: reports-frontend
       KEYCLOAK_CLIENT_SECRET: ""
     depends_on:
@@ -78,7 +94,11 @@ services:
       REACT_APP_API_URL: http://localhost:8000
       REACT_APP_AUTH_URL: http://localhost:8081
       REACT_APP_KEYCLOAK_URL: http://localhost:8080
-      REACT_APP_KEYCLOAK_REALM: reports-realm
+      REACT_APP_KEYCLOAK_REALM: reports-realm-updated
       REACT_APP_KEYCLOAK_CLIENT_ID: reports-frontend
     depends_on:
       - bionicpro-auth
+
+volumes:
+  ldap-data:
+  ldap-config:
