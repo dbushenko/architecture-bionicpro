@@ -141,28 +141,27 @@ app.get('/reports/today', async (req, res) => {
     const userInfo = await getUserInfoFromSession(sessionId);
     const userId = userInfo.userId;
 
-    // Get today's date range
+    // Get today's date
     const today = new Date();
-    const startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    const todayDate = today.toISOString().split('T')[0]; // Format: YYYY-MM-DD
 
-    // Query sensor readings for today
+    // Query aggregated sensor data for today (daily aggregations)
     const query = `
-      SELECT * FROM sensor_readings
+      SELECT * FROM aggregated_sensor_data
       WHERE user_id = $1
-      AND timestamp >= $2
-      AND timestamp < $3
-      ORDER BY timestamp ASC
+      AND aggregation_period = 'daily'
+      AND period_date = $2
+      ORDER BY sensor_type ASC
     `;
 
-    const result = await pool.query(query, [userId, startDate, endDate]);
+    const result = await pool.query(query, [userId, todayDate]);
 
     // Convert to CSV format
     if (result.rows.length === 0) {
       // Return empty CSV with headers
-      const csvHeaders = 'id,sensor_type,sensor_value,timestamp\n';
+      const csvHeaders = 'id,sensor_type,measurement_count,min_value,max_value,avg_value,trend\n';
       res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${today.toISOString().split('T')[0]}.csv`);
+      res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${todayDate}.csv`);
       res.send(csvHeaders);
       return;
     }
@@ -170,15 +169,18 @@ app.get('/reports/today', async (req, res) => {
     // Create CSV content
     const csvRows = [];
     // Add headers
-    csvRows.push(['id', 'sensor_type', 'sensor_value', 'timestamp'].join(','));
+    csvRows.push(['id', 'sensor_type', 'measurement_count', 'min_value', 'max_value', 'avg_value', 'trend'].join(','));
 
     // Add data rows
     for (const row of result.rows) {
       const csvRow = [
         row.id,
         `"${row.sensor_type}"`, // Wrap in quotes in case of commas
-        row.sensor_value,
-        `"${row.timestamp}"`
+        row.measurement_count,
+        row.min_value,
+        row.max_value,
+        row.avg_value,
+        `"${row.trend}"`
       ].join(',');
       csvRows.push(csvRow);
     }
@@ -187,14 +189,14 @@ app.get('/reports/today', async (req, res) => {
 
     // Send CSV file as attachment
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${today.toISOString().split('T')[0]}.csv`);
+    res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${todayDate}.csv`);
     res.send(csvContent);
   } catch (error) {
-    console.error('Error fetching today\'s sensor data:', error);
+    console.error('Error fetching today\'s aggregated sensor data:', error);
     if (error.response && error.response.status === 401) {
       return res.status(401).json({ error: 'Unauthorized: Invalid session' });
     }
-    res.status(500).json({ error: 'Failed to fetch sensor data' });
+    res.status(500).json({ error: 'Failed to fetch aggregated sensor data' });
   }
 });
 
