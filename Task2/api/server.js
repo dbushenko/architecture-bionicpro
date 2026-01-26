@@ -128,6 +128,76 @@ app.get('/sensor-data', async (req, res) => {
   }
 });
 
+// Endpoint to get today's sensor data report as CSV
+app.get('/reports/today', async (req, res) => {
+  const sessionId = req.cookies.SESSION_ID;
+
+  if (!sessionId) {
+    return res.status(401).json({ error: 'No session found' });
+  }
+
+  try {
+    // Get user info from session
+    const userInfo = await getUserInfoFromSession(sessionId);
+    const userId = userInfo.userId;
+
+    // Get today's date range
+    const today = new Date();
+    const startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+
+    // Query sensor readings for today
+    const query = `
+      SELECT * FROM sensor_readings
+      WHERE user_id = $1
+      AND timestamp >= $2
+      AND timestamp < $3
+      ORDER BY timestamp ASC
+    `;
+
+    const result = await pool.query(query, [userId, startDate, endDate]);
+
+    // Convert to CSV format
+    if (result.rows.length === 0) {
+      // Return empty CSV with headers
+      const csvHeaders = 'id,sensor_type,sensor_value,timestamp\n';
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${today.toISOString().split('T')[0]}.csv`);
+      res.send(csvHeaders);
+      return;
+    }
+
+    // Create CSV content
+    const csvRows = [];
+    // Add headers
+    csvRows.push(['id', 'sensor_type', 'sensor_value', 'timestamp'].join(','));
+
+    // Add data rows
+    for (const row of result.rows) {
+      const csvRow = [
+        row.id,
+        `"${row.sensor_type}"`, // Wrap in quotes in case of commas
+        row.sensor_value,
+        `"${row.timestamp}"`
+      ].join(',');
+      csvRows.push(csvRow);
+    }
+
+    const csvContent = csvRows.join('\n');
+
+    // Send CSV file as attachment
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${today.toISOString().split('T')[0]}.csv`);
+    res.send(csvContent);
+  } catch (error) {
+    console.error('Error fetching today\'s sensor data:', error);
+    if (error.response && error.response.status === 401) {
+      return res.status(401).json({ error: 'Unauthorized: Invalid session' });
+    }
+    res.status(500).json({ error: 'Failed to fetch sensor data' });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });

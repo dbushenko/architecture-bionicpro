@@ -169,7 +169,7 @@ const ReportPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/reports`, {
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/reports/today`, {
         credentials: 'include', // Important: include cookies in the request
       });
 
@@ -183,12 +183,13 @@ const ReportPage: React.FC = () => {
         return;
       }
 
-      // Handle the response - assuming it's a downloadable file
+      // Handle the response - expecting CSV file
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.download = 'report.pdf'; // Adjust filename as needed
+      const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      link.download = `sensor_report_${today}.csv`;
       document.body.appendChild(link);
       link.click();
       link.remove();
