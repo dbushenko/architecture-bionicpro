@@ -242,6 +242,44 @@
       "bearerOnly": true
     }
   ],
+  "identityProviders": [
+    {
+      "alias": "yandex",
+      "displayName": "",
+      "internalId": "dbe067eb-9603-40c0-bbee-802cf1682300",
+      "providerId": "yandex",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "linkOnly": false,
+      "hideOnLogin": false,
+      "config": {
+        "clientId": "c397af8b113a46508fb4b4780477e247",
+        "acceptsPromptNoneForwardFromClient": "false",
+        "disableUserInfo": "false",
+        "showInAccountConsole": "ALWAYS",
+        "filteredByClaim": "false",
+        "syncMode": "IMPORT",
+        "forceConfirm": "false",
+        "clientSecret": "**********",
+        "caseSensitiveOriginalUsername": "false",
+        "defaultScope": "login:info"
+      },
+      "types": []
+    }
+  ],
+  "identityProviderMappers": [
+    {
+      "id": "9d50121c-c720-425f-b0a9-2d49c2de1c34",
+      "name": "email",
+      "identityProviderAlias": "yandex",
+      "identityProviderMapper": "yandex-user-attribute-mapper",
+      "config": {
+        "syncMode": "INHERIT",
+        "userAttribute": "email"
+      }
+    }
+  ],
   "components": {
     "org.keycloak.services.managers.LDAPServerCapabilities": [],
     "org.keycloak.storage.UserStorageProvider": [
