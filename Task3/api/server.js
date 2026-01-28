@@ -3,6 +3,7 @@ const axios = require('axios');
 const cors = require('cors');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
+const Minio = require('minio');
 require('dotenv').config();
 
 const app = express();
@@ -23,6 +24,15 @@ const pool = new Pool({
   database: 'api_db',
   user: 'api_user',
   password: 'api_password',
+});
+
+// MinIO client setup
+const minioClient = new Minio.Client({
+  endPoint: process.env.MINIO_ENDPOINT || 'minio',
+  port: parseInt(process.env.MINIO_PORT) || 9000,
+  useSSL: false,
+  accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
+  secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
 });
 
 // Endpoint to exchange session ID for user info (sub)
@@ -144,6 +154,29 @@ app.get('/reports/today', async (req, res) => {
     // Get today's date
     const today = new Date();
     const todayDate = today.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+    const fileName = `sensor_report_${userId}_${todayDate}.csv`;
+
+    console.log(`Checking if report exists in MinIO for /reports/today endpoint: reports/${fileName}`);
+
+    // Check if report already exists in MinIO
+    try {
+      await minioClient.statObject('reports', fileName);
+      // If the file exists in MinIO, redirect to CDN to serve it from there
+      // This allows leveraging the CDN caching and reduces load on the API
+      console.log(`Report found in MinIO, redirecting to CDN: reports/${fileName}`);
+      // Use the same CDN URL format as in the frontend
+      const cdnUrl = `${process.env.CDN_URL || process.env.REACT_APP_CDN_URL || 'http://localhost:8080'}/reports/${fileName}`;
+      console.log(`Redirecting to CDN URL: ${cdnUrl}`);
+      return res.redirect(302, cdnUrl);
+    } catch (statError) {
+      // File doesn't exist in MinIO, continue with database query and CSV generation
+      if (statError.code !== 'NotFound') {
+        // Some other error occurred
+        console.error(`Error checking report existence in MinIO:`, statError);
+        throw statError;
+      }
+      console.log(`Report not found in MinIO, generating from database: reports/${fileName}`);
+    }
 
     // Query aggregated sensor data for today (daily aggregations)
     const query = `
@@ -161,7 +194,7 @@ app.get('/reports/today', async (req, res) => {
       // Return empty CSV with headers
       const csvHeaders = 'id,sensor_type,measurement_count,min_value,max_value,avg_value,trend\n';
       res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${todayDate}.csv`);
+      res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${userId}_${todayDate}.csv`);
       res.send(csvHeaders);
       return;
     }
@@ -189,7 +222,8 @@ app.get('/reports/today', async (req, res) => {
 
     // Send CSV file as attachment
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${todayDate}.csv`);
+    res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${userId}_${todayDate}.csv`);
+    console.log(`Sending CSV from database for: reports/${fileName}`);
     res.send(csvContent);
   } catch (error) {
     console.error('Error fetching today\'s aggregated sensor data:', error);
@@ -197,6 +231,111 @@ app.get('/reports/today', async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized: Invalid session' });
     }
     res.status(500).json({ error: 'Failed to fetch aggregated sensor data' });
+  }
+});
+
+// Endpoint to generate and upload today's sensor data report to MinIO
+app.post('/reports/generate-today', async (req, res) => {
+  const sessionId = req.cookies.SESSION_ID;
+
+  if (!sessionId) {
+    return res.status(401).json({ error: 'No session found' });
+  }
+
+  try {
+    // Get user info from session
+    const userInfo = await getUserInfoFromSession(sessionId);
+    const userId = userInfo.userId;
+
+    // Get today's date
+    const today = new Date();
+    const todayDate = today.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+    const fileName = `sensor_report_${userId}_${todayDate}.csv`;
+
+    console.log(`Checking if report exists in MinIO: reports/${fileName}`);
+
+    // Check if report already exists in MinIO
+    try {
+      await minioClient.statObject('reports', fileName);
+      // If the file already exists, return success without regenerating
+      console.log(`Report already exists in MinIO: reports/${fileName}`);
+      return res.json({
+        success: true,
+        message: `Report already exists in MinIO: reports/${fileName}`,
+        fileName: fileName
+      });
+    } catch (statError) {
+      // File doesn't exist, continue with generation
+      if (statError.code !== 'NotFound') {
+        // Some other error occurred
+        console.error(`Error checking report existence in MinIO:`, statError);
+        throw statError;
+      }
+      console.log(`Report does not exist in MinIO, proceeding with generation: reports/${fileName}`);
+    }
+
+    // Query aggregated sensor data for today (daily aggregations)
+    const query = `
+      SELECT * FROM aggregated_sensor_data
+      WHERE user_id = $1
+      AND aggregation_period = 'daily'
+      AND period_date = $2
+      ORDER BY sensor_type ASC
+    `;
+
+    const result = await pool.query(query, [userId, todayDate]);
+
+    // Create CSV content
+    const csvRows = [];
+
+    // Add headers
+    csvRows.push(['id', 'sensor_type', 'measurement_count', 'min_value', 'max_value', 'avg_value', 'trend'].join(','));
+
+    // Add data rows
+    for (const row of result.rows) {
+      const csvRow = [
+        row.id,
+        `"${row.sensor_type}"`, // Wrap in quotes in case of commas
+        row.measurement_count,
+        row.min_value,
+        row.max_value,
+        row.avg_value,
+        `"${row.trend}"`
+      ].join(',');
+      csvRows.push(csvRow);
+    }
+
+    const csvContent = csvRows.join('\n');
+
+    // Upload to MinIO
+    const buffer = Buffer.from(csvContent, 'utf8');
+
+    // Check if bucket exists, if not create it
+    const bucketExists = await minioClient.bucketExists('reports');
+    if (!bucketExists) {
+      await minioClient.makeBucket('reports', 'us-east-1');
+      console.log('Created bucket reports');
+    }
+
+    console.log(`Uploading report to MinIO: reports/${fileName}, size: ${buffer.length} bytes`);
+
+    await minioClient.putObject('reports', fileName, buffer, buffer.length, {
+      'Content-Type': 'text/csv',
+    });
+
+    console.log(`Successfully uploaded report to MinIO: reports/${fileName}`);
+
+    res.json({
+      success: true,
+      message: `Report generated and uploaded to MinIO: reports/${fileName}`,
+      fileName: fileName
+    });
+  } catch (error) {
+    console.error('Error generating and uploading report to MinIO:', error);
+    if (error.response && error.response.status === 401) {
+      return res.status(401).json({ error: 'Unauthorized: Invalid session' });
+    }
+    res.status(500).json({ error: 'Failed to generate and upload report to MinIO' });
   }
 });
 

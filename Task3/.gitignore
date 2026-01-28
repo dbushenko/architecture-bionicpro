@@ -1,0 +1,77 @@
+# Logs
+*.log
+*.out
+*.err
+
+# Environment
+#.env
+#.env.local
+#.env.production
+#.env.development
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Distribution / packaging
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+!docker-compose.yaml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# MinIO client
+.minio/
+
+# Reports
+*.csv
+*.xlsx
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xml
+
+# Backup files
+*~
+#*#
+
+# Nginx cache
+/var/cache/nginx/*
+
+# Local development
+local/

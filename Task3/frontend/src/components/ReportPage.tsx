@@ -169,18 +169,83 @@ const ReportPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/reports/today`, {
+      // Получаем информацию о пользователе для получения ID
+      const userInfoResponse = await fetch(`${process.env.REACT_APP_AUTH_URL}/auth/user-info`, {
         credentials: 'include', // Important: include cookies in the request
       });
 
-      if (!response.ok) {
-        if (response.status === 401) {
+      if (!userInfoResponse.ok) {
+        if (userInfoResponse.status === 401) {
           setError('Not authenticated');
           setIsLoggedIn(false);
+        }
+        throw new Error(`HTTP error when getting user info! status: ${userInfoResponse.status}`);
+      }
+
+      const userInfo = await userInfoResponse.json();
+      const userId = userInfo.userId;
+
+      // Генерируем имя файла отчета с ID пользователя
+      const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      const fileName = `sensor_report_${userId}_${today}.csv`;
+      const cdnUrl = `${process.env.REACT_APP_CDN_URL}/reports/${fileName}`;
+      const generateApiUrl = `${process.env.REACT_APP_API_URL}/reports/generate-today`;
+
+      console.log(`Attempting to download report: ${fileName}`);
+      console.log(`CDN URL: ${cdnUrl}`);
+
+      // Проверяем, существует ли отчет в MinIO через CDN
+      let response = await fetch(cdnUrl);
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`Report not found in CDN, generating via API: ${generateApiUrl}`);
+
+          // Отчет не найден, вызываем API для генерации и загрузки в MinIO
+          response = await fetch(generateApiUrl, {
+            method: 'POST',
+            credentials: 'include', // Important: include cookies in the request
+          });
+
+          if (!response.ok) {
+            if (response.status === 401) {
+              setError('Not authenticated');
+              setIsLoggedIn(false);
+            } else {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return;
+          }
+
+          console.log(`Report generation initiated, waiting before checking CDN again`);
+
+          // После генерации и загрузки ждем немного и снова проверяем через CDN
+          // Это позволяет избежать проблем с кэшированием и обеспечивает,
+          // что объект успеет записаться в MinIO
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Ждем 2 секунды
+
+          // Повторный запрос с добавлением параметра времени для избежания кэширования
+          const cacheBusterUrl = `${cdnUrl}?t=${new Date().getTime()}`;
+          console.log(`Checking CDN again with cache buster: ${cacheBusterUrl}`);
+          response = await fetch(cacheBusterUrl);
+
+          // Если и после этого не удается получить файл, пробуем еще раз с другим параметром
+          if (!response.ok && response.status === 404) {
+            console.log(`Still not found, waiting more and trying again`);
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Ждем еще 3 секунды
+            const cacheBusterUrl2 = `${cdnUrl}?t=${new Date().getTime()}`;
+            console.log(`Final attempt with cache buster: ${cacheBusterUrl2}`);
+            response = await fetch(cacheBusterUrl2);
+          }
         } else {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-        return;
+      } else {
+        console.log(`Report found in CDN, downloading directly`);
+      }
+
+      if (!response.ok) {
+        throw new Error(`Failed to download report from CDN after generation. HTTP error! status: ${response.status}`);
       }
 
       // Handle the response - expecting CSV file
@@ -188,12 +253,14 @@ const ReportPage: React.FC = () => {
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;
-      const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
-      link.download = `sensor_report_${today}.csv`;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       link.remove();
+
+      console.log(`Report downloaded successfully: ${fileName}`);
     } catch (err) {
+      console.error('Error in downloadReport:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
