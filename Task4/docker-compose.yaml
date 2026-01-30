@@ -38,6 +38,12 @@ services:
       POSTGRES_DB: api_db
       POSTGRES_USER: api_user
       POSTGRES_PASSWORD: api_password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    command: >
+      postgres
+      -c wal_level=logical
+      -c max_replication_slots=4
+      -c max_wal_senders=4
     volumes:
       - ./postgres-api-data:/var/lib/postgresql/data
       - ./create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
@@ -124,6 +130,10 @@ services:
       - postgres-airflow
       - api_db
       - minio
+      - zookeeper
+      - kafka
+      - debezium-init
+      - clickhouse
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
@@ -134,6 +144,7 @@ services:
       - AIRFLOW_CONN_API_DB_CONNECTION=postgresql://api_user:api_password@api_db:5432/api_db
       - AIRFLOW__AWS__AWS_DEFAULT_REGION=us-east-1
       - AIRFLOW_CONN_MINIO_CONNECTION=aws://minioadmin:minioadmin@minio:9000
+      - AIRFLOW__CELERY__RESULT_BACKEND=rpc://
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/airflow.cfg:/opt/airflow/airflow.cfg
@@ -152,6 +163,10 @@ services:
       - api_db
       - airflow-init
       - minio
+      - zookeeper
+      - kafka
+      - debezium
+      - clickhouse
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
@@ -162,6 +177,7 @@ services:
       - AIRFLOW_CONN_API_DB_CONNECTION=postgresql://api_user:api_password@api_db:5432/api_db
       - AIRFLOW__AWS__AWS_DEFAULT_REGION=us-east-1
       - AIRFLOW_CONN_MINIO_CONNECTION=aws://minioadmin:minioadmin@minio:9000
+      - AIRFLOW__CELERY__RESULT_BACKEND=rpc://
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/airflow.cfg:/opt/airflow/airflow.cfg
@@ -183,6 +199,10 @@ services:
       - api_db
       - airflow-init
       - minio
+      - zookeeper
+      - kafka
+      - debezium
+      - clickhouse
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
@@ -193,6 +213,7 @@ services:
       - AIRFLOW_CONN_API_DB_CONNECTION=postgresql://api_user:api_password@api_db:5432/api_db
       - AIRFLOW__AWS__AWS_DEFAULT_REGION=us-east-1
       - AIRFLOW_CONN_MINIO_CONNECTION=aws://minioadmin:minioadmin@minio:9000
+      - AIRFLOW__CELERY__RESULT_BACKEND=rpc://
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/airflow.cfg:/opt/airflow/airflow.cfg
@@ -211,6 +232,10 @@ services:
     depends_on:
       - api_db
       - bionicpro-auth
+      - zookeeper
+      - kafka
+      - debezium-init
+      - clickhouse
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 30s
@@ -231,6 +256,10 @@ services:
       REACT_APP_KEYCLOAK_CLIENT_ID: reports-frontend
     depends_on:
       - bionicpro-auth
+      - zookeeper
+      - kafka
+      - debezium-init
+      - clickhouse
 
   minio:
     image: minio/minio:RELEASE.2023-09-04T19-57-37Z
@@ -255,6 +284,10 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - minio
+      - zookeeper
+      - kafka
+      - debezium-init
+      - clickhouse
 
   cdn:
     image: nginx:alpine
@@ -264,8 +297,68 @@ services:
       - ./cdn/nginx.conf:/etc/nginx/nginx.conf
     depends_on:
       - minio
+      - zookeeper
+      - kafka
+      - debezium-init
+      - clickhouse
     networks:
       - default
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      - zookeeper
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+
+  debezium:
+    image: debezium/connect:2.6
+    ports:
+      - "8085:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: my_connect_configs
+      OFFSET_STORAGE_TOPIC: my_connect_offsets
+      STATUS_STORAGE_TOPIC: my_connect_statuses
+      PLUGIN_PATH: /usr/share/java,/usr/share/debezium-plugins
+    depends_on:
+      - zookeeper
+      - kafka
+      - api_db
+    volumes:
+      - ./debezium-postgres-connector.json:/debezium-postgres-connector.json
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  debezium-init:
+    image: curlimages/curl:latest
+    depends_on:
+      - debezium
+    volumes:
+      - ./debezium-postgres-connector.json:/debezium-postgres-connector.json
+      - ./debezium-init.sh:/debezium-init.sh
+    command: sh /debezium-init.sh
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -278,13 +371,17 @@ services:
       CLICKHOUSE_PASSWORD: default_password
     volumes:
       - clickhouse-data:/var/lib/clickhouse
-      - ./create_clickhouse_tables.sql:/docker-entrypoint-initdb.d/create_clickhouse_tables.sql
+      - ./create_clickhouse_tables_final.sql:/docker-entrypoint-initdb.d/create_clickhouse_tables_final.sql
       - ./init_clickhouse.sh:/docker-entrypoint-initdb.d/init_clickhouse.sh
+    depends_on:
+      - zookeeper
+      - kafka
+      - debezium-init
     command: |
       bash -c "
       /entrypoint.sh &
       sleep 10
-      /docker-entrypoint-initdb.d/init_clickhouse.sh
+      /docker-entrypoint-initdb.d/init_clickhouse.sh &
       wait
       "
     healthcheck:
@@ -300,3 +397,6 @@ volumes:
   postgres-airflow-data:
   minio-data:
   clickhouse-data:
+  kafka-data:
+  zookeeper-data:
+  zookeeper-log:
