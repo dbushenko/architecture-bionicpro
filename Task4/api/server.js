@@ -4,6 +4,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const cookieParser = require('cookie-parser');
 const Minio = require('minio');
+const { ClickHouseClient, createClient } = require('@clickhouse/client');
 require('dotenv').config();
 
 const app = express();
@@ -24,6 +25,15 @@ const pool = new Pool({
   database: 'api_db',
   user: 'api_user',
   password: 'api_password',
+});
+
+// ClickHouse client setup
+const clickhouse = createClient({
+  url: process.env.CLICKHOUSE_URL || 'http://clickhouse:8123',
+  username: process.env.CLICKHOUSE_USER || 'default',
+  password: process.env.CLICKHOUSE_PASSWORD || 'default_password',
+  database: process.env.CLICKHOUSE_DB || 'default',
+  request_timeout: 60000, // 60 seconds
 });
 
 // MinIO client setup
@@ -344,6 +354,54 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
+// ClickHouse health check endpoint
+app.get('/clickhouse-health', async (req, res) => {
+  try {
+    const queryResult = await clickhouse.query({ query: 'SELECT version()' });
+    const version = (await queryResult.text()).trim();
+
+    res.json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      clickhouse_version: version
+    });
+  } catch (error) {
+    console.error('ClickHouse health check failed:', error);
+    res.status(500).json({
+      status: 'ERROR',
+      error: error.message
+    });
+  }
+});
+
+// Function to test ClickHouse connection with retry
+async function testClickHouseConnection(maxRetries = 10, delay = 5000) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      console.log(`Attempting to connect to ClickHouse (${i + 1}/${maxRetries})...`);
+      console.log(`ClickHouse URL: ${process.env.CLICKHOUSE_URL || 'http://clickhouse:8123'}`);
+
+      const queryResult = await clickhouse.query({ query: 'SELECT version()' });
+      const resultSet = await queryResult.json();
+      const version = resultSet.data && resultSet.data[0] && resultSet.data[0]['version()'];
+      console.log(`Connected to ClickHouse version: ${version}`);
+      return true;
+    } catch (error) {
+      console.warn(`Attempt ${i + 1} to connect to ClickHouse failed:`, error.message);
+      console.warn(`Error code: ${error.code}, Error syscall: ${error.syscall}`);
+      if (i === maxRetries - 1) {
+        console.error('Failed to connect to ClickHouse after all retries:', error.message);
+        return false;
+      }
+      // Wait before next attempt
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
+app.listen(PORT, async () => {
   console.log(`Sensor API Server is running on port ${PORT}`);
+
+  // Test ClickHouse connection on startup with retry
+  await testClickHouseConnection();
 });

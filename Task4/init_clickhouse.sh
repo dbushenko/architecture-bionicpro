@@ -19,5 +19,5 @@ clickhouse-client --host localhost --port 9000 --multiquery < /docker-entrypoint
 
 echo "Tables created successfully!"
 
-# Запускаем бесконечный цикл, чтобы контейнер продолжал работать
-exec tail -f /dev/null
+# Завершаем скрипт, позволяя основному процессу ClickHouse продолжать работу
+exit 0

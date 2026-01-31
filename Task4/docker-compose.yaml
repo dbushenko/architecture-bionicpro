@@ -373,6 +373,7 @@ services:
       - clickhouse-data:/var/lib/clickhouse
       - ./create_clickhouse_tables_final.sql:/docker-entrypoint-initdb.d/create_clickhouse_tables_final.sql
       - ./init_clickhouse.sh:/docker-entrypoint-initdb.d/init_clickhouse.sh
+      - ./clickhouse_config.xml:/etc/clickhouse-server/config.d/listen.xml
     depends_on:
       - zookeeper
       - kafka
