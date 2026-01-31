@@ -185,22 +185,31 @@ app.get('/reports/today', async (req, res) => {
         console.error(`Error checking report existence in MinIO:`, statError);
         throw statError;
       }
-      console.log(`Report not found in MinIO, generating from database: reports/${fileName}`);
+      console.log(`Report not found in MinIO, generating from ClickHouse: reports/${fileName}`);
     }
 
-    // Query aggregated sensor data for today (daily aggregations)
+    // Query aggregated sensor data for today (daily aggregations) from ClickHouse
     const query = `
       SELECT * FROM aggregated_sensor_data
-      WHERE user_id = $1
-      AND aggregation_period = 'daily'
-      AND period_date = $2
+      WHERE user_id = {userId:String}
+      AND aggregation_period = {aggregationPeriod:String}
+      AND period_date = {periodDate:String}
       ORDER BY sensor_type ASC
     `;
 
-    const result = await pool.query(query, [userId, todayDate]);
+    const result = await clickhouse.query({
+      query: query,
+      query_params: {
+        userId: userId,
+        aggregationPeriod: 'daily',
+        periodDate: todayDate
+      }
+    });
+    const resultSet = await result.json();
+    const rows = resultSet.data || [];
 
     // Convert to CSV format
-    if (result.rows.length === 0) {
+    if (rows.length === 0) {
       // Return empty CSV with headers
       const csvHeaders = 'id,sensor_type,measurement_count,min_value,max_value,avg_value,trend\n';
       res.setHeader('Content-Type', 'text/csv');
@@ -215,7 +224,7 @@ app.get('/reports/today', async (req, res) => {
     csvRows.push(['id', 'sensor_type', 'measurement_count', 'min_value', 'max_value', 'avg_value', 'trend'].join(','));
 
     // Add data rows
-    for (const row of result.rows) {
+    for (const row of rows) {
       const csvRow = [
         row.id,
         `"${row.sensor_type}"`, // Wrap in quotes in case of commas
@@ -233,14 +242,14 @@ app.get('/reports/today', async (req, res) => {
     // Send CSV file as attachment
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=sensor_report_${userId}_${todayDate}.csv`);
-    console.log(`Sending CSV from database for: reports/${fileName}`);
+    console.log(`Sending CSV from ClickHouse for: reports/${fileName}`);
     res.send(csvContent);
   } catch (error) {
-    console.error('Error fetching today\'s aggregated sensor data:', error);
+    console.error('Error fetching today\'s aggregated sensor data from ClickHouse:', error);
     if (error.response && error.response.status === 401) {
       return res.status(401).json({ error: 'Unauthorized: Invalid session' });
     }
-    res.status(500).json({ error: 'Failed to fetch aggregated sensor data' });
+    res.status(500).json({ error: 'Failed to fetch aggregated sensor data from ClickHouse' });
   }
 });
 
@@ -284,16 +293,25 @@ app.post('/reports/generate-today', async (req, res) => {
       console.log(`Report does not exist in MinIO, proceeding with generation: reports/${fileName}`);
     }
 
-    // Query aggregated sensor data for today (daily aggregations)
+    // Query aggregated sensor data for today (daily aggregations) from ClickHouse
     const query = `
       SELECT * FROM aggregated_sensor_data
-      WHERE user_id = $1
-      AND aggregation_period = 'daily'
-      AND period_date = $2
+      WHERE user_id = {userId:String}
+      AND aggregation_period = {aggregationPeriod:String}
+      AND period_date = {periodDate:String}
       ORDER BY sensor_type ASC
     `;
 
-    const result = await pool.query(query, [userId, todayDate]);
+    const result = await clickhouse.query({
+      query: query,
+      query_params: {
+        userId: userId,
+        aggregationPeriod: 'daily',
+        periodDate: todayDate
+      }
+    });
+    const resultSet = await result.json();
+    const rows = resultSet.data || [];
 
     // Create CSV content
     const csvRows = [];
@@ -302,7 +320,7 @@ app.post('/reports/generate-today', async (req, res) => {
     csvRows.push(['id', 'sensor_type', 'measurement_count', 'min_value', 'max_value', 'avg_value', 'trend'].join(','));
 
     // Add data rows
-    for (const row of result.rows) {
+    for (const row of rows) {
       const csvRow = [
         row.id,
         `"${row.sensor_type}"`, // Wrap in quotes in case of commas
@@ -341,11 +359,11 @@ app.post('/reports/generate-today', async (req, res) => {
       fileName: fileName
     });
   } catch (error) {
-    console.error('Error generating and uploading report to MinIO:', error);
+    console.error('Error generating and uploading report from ClickHouse to MinIO:', error);
     if (error.response && error.response.status === 401) {
       return res.status(401).json({ error: 'Unauthorized: Invalid session' });
     }
-    res.status(500).json({ error: 'Failed to generate and upload report to MinIO' });
+    res.status(500).json({ error: 'Failed to generate and upload report from ClickHouse to MinIO' });
   }
 });
 

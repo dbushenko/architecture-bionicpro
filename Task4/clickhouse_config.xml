@@ -1,0 +1,24 @@
+<clickhouse>
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+    <interserver_http_port>9009</interserver_http_port>
+    
+    <!-- Разрешаем подключения с любых адресов -->
+    <listen_host>0.0.0.0</listen_host>
+    
+    <!-- Разрешаем подключения для пользователей -->
+    <users>
+        <default>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+        </default>
+    </users>
+    
+    <profiles>
+        <default>
+            <allow_experimental_lightweight_delete>1</allow_experimental_lightweight_delete>
+            <mutations_sync>0</mutations_sync>
+        </default>
+    </profiles>
+</clickhouse>
