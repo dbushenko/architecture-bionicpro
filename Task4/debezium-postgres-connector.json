@@ -1,0 +1,25 @@
+{
+  "name": "sensor-readings-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "api_db",
+    "database.port": "5432",
+    "database.user": "api_user",
+    "database.password": "api_password",
+    "database.dbname": "api_db",
+    "database.server.name": "dbserver1",
+    "topic.prefix": "dbserver1",
+    "table.include.list": "public.sensor_readings",
+    "plugin.name": "pgoutput",
+    "publication.name": "dbz_publication",
+    "slot.name": "dbz_slot",
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "dbhistory.sensor_readings",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "decimal.handling.mode": "double",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}
